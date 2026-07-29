@@ -35,6 +35,47 @@ const TYPE_META = {
   half:    { icon: "🕐", color: "#4a6080", label: "Half day" },
 };
 
+/* ────────────────────────────────────────────────────────────────────────
+   IOA CROWD SCORES — hardcoded from Thrill Data (their site blocks server-
+   side fetches, so this refreshes manually rather than live).
+   2026 dates: pulled directly from Thrill Data's 2026 calendar.
+   2027 dates: Thrill Data hasn't published 2027 yet. These use 2025
+   HISTORICAL ACTUALS as a proxy — matched by DAY-OF-WEEK IDENTITY, not raw
+   calendar date, since crowd patterns track weekday far more than day-of-
+   month (Thrill Data's own data: Mondays ~30min avg, Saturdays ~32-35min).
+   Named federal holidays that always fall on the same weekday (MLK,
+   Presidents Day, Memorial Day) use that holiday's actual 2025 occurrence.
+   Fixed-calendar-date holidays (New Year's, Juneteenth) and arbitrary
+   school-picked days use the nearest 2025 date sharing the same weekday.
+   Marked with * in the UI. Re-pull real 2027 data once Thrill Data
+   publishes it.
+   Source: thrill-data.com/trip-planning/crowd-calendar/islands-of-adventure
+   Pulled: July 2026
+──────────────────────────────────────────────────────────────────────── */
+const CROWD_SCORES = {
+  "2026-09-07": { score: 19 },
+  "2026-09-16": { score: 20 },
+  "2026-09-21": { score: 20 },
+  "2026-10-12": { score: 35 },
+  "2026-10-14": { score: 32 },
+  "2026-11-03": { score: 26 },
+  "2026-11-11": { score: 38 },
+  "2026-11-23": { score: 45 },
+  "2026-12-21": { score: 40 },
+  "2027-01-01": { score: 36, proxy: true }, // Fri — nearest Fri, Jan 3 2025
+  "2027-01-04": { score: 31, proxy: true }, // Mon — nearest Mon, Jan 6 2025
+  "2027-01-18": { score: 32, proxy: true }, // Mon — actual MLK Day 2025 (Jan 20)
+  "2027-02-15": { score: 48, proxy: true }, // Mon — actual Presidents Day 2025 (Feb 17)
+  "2027-02-22": { score: 33, proxy: true }, // Mon — nearest Mon, Feb 24 2025
+  "2027-03-10": { score: 34, proxy: true }, // Wed — nearest Wed, Mar 12 2025
+  "2027-03-22": { score: 34, proxy: true }, // Mon — nearest Mon, Mar 24 2025
+  "2027-03-29": { score: 29, proxy: true }, // Mon — nearest Mon, Mar 31 2025
+  "2027-04-21": { score: 39, proxy: true }, // Wed — nearest Wed, Apr 23 2025
+  "2027-05-26": { score: 37, proxy: true }, // Wed — nearest Wed, May 28 2025
+  "2027-05-31": { score: 31, proxy: true }, // Mon — actual Memorial Day 2025 (May 26)
+  "2027-06-17": { score: 30, proxy: true }, // Thu — nearest Thu, Jun 19 2025
+};
+
 const HOTELS = [
   { id: "hardrock",     name: "Hard Rock",     emoji: "🎸" },
   { id: "portofino",    name: "Portofino Bay", emoji: "🌋" },
@@ -72,24 +113,10 @@ const CSS = `
 `;
 
 export default function App() {
-  const [crowdScores, setCrowdScores] = useState({});
   const [rates, setRates] = useState({}); // { "2026-09-07": {hardrock:{rate,link}, ...} }
   const [loadingRates, setLoadingRates] = useState({});
-  const [crowdStatus, setCrowdStatus] = useState("loading");
   const [lastUpdated, setLastUpdated] = useState(null);
   const [cooldown, setCooldown] = useState(0);
-
-  const fetchCrowd = useCallback(async () => {
-    setCrowdStatus("loading");
-    try {
-      const res = await fetch("/api/crowdcalendar");
-      const data = await res.json();
-      setCrowdScores(data.scores || {});
-      setCrowdStatus(data.stale ? "stale" : "ok");
-    } catch {
-      setCrowdStatus("error");
-    }
-  }, []);
 
   const fetchRate = useCallback(async (dateEntry) => {
     const { date } = dateEntry;
@@ -107,11 +134,10 @@ export default function App() {
 
   const refreshAll = useCallback(() => {
     if (cooldown > 0) return;
-    fetchCrowd();
     DATES.forEach(d => fetchRate(d));
     setLastUpdated(new Date());
     setCooldown(90);
-  }, [cooldown, fetchCrowd, fetchRate]);
+  }, [cooldown, fetchRate]);
 
   useEffect(() => { refreshAll(); }, []); // eslint-disable-line
 
@@ -160,9 +186,7 @@ export default function App() {
         </div>
         {lastUpdated && (
           <div style={{ fontSize: 10, color: "#3d5470", marginTop: 8 }}>
-            Last updated {lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-            {crowdStatus === "stale" && " · crowd data is cached (source unavailable)"}
-            {crowdStatus === "error" && " · crowd fetch failed"}
+            Rates last updated {lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · IOA crowd scores are manually refreshed (Thrill Data blocks live fetches)
           </div>
         )}
       </div>
@@ -194,7 +218,8 @@ export default function App() {
           <tbody>
             {DATES.map((d) => {
               const meta = TYPE_META[d.type];
-              const score = crowdScores[d.date];
+              const scoreEntry = CROWD_SCORES[d.date];
+              const score = scoreEntry?.score;
               const cheapest = cheapestFor(d.date);
               const rowRates = rates[d.date];
               const isLoading = loadingRates[d.date];
@@ -216,9 +241,9 @@ export default function App() {
                         display: "inline-block", padding: "3px 9px", borderRadius: 20,
                         background: `${crowdColor(score)}22`, color: crowdColor(score),
                         fontWeight: 800, fontSize: 12,
-                      }}>{score}</span>
+                      }}>{score}{scoreEntry.proxy && "*"}</span>
                     ) : (
-                      <span style={{ color: "#3d5470", fontSize: 11 }}>{crowdStatus === "loading" ? "…" : "—"}</span>
+                      <span style={{ color: "#3d5470", fontSize: 11 }}>—</span>
                     )}
                   </td>
                   {HOTELS.map(h => {
@@ -252,6 +277,7 @@ export default function App() {
       <div style={{ padding: "0 16px", fontSize: 10, color: "#3d5470", lineHeight: 1.6 }}>
         Rates shown are public Google Hotels rates, not Florida Passholder rates — use these to spot which dates are worth checking directly on Universal's site.
         Crowd score is Islands of Adventure's predicted average wait time in minutes (Thrill Data). ★ marks the cheapest of the 4 hotels for that date.
+        <br/>* 2027 crowd scores use that same calendar date's 2025 actual as a proxy — Thrill Data hasn't published 2027 predictions yet.
       </div>
     </div>
   );
